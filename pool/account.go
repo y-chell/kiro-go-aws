@@ -41,10 +41,22 @@ func GetPool() *AccountPool {
 }
 
 // Reload 从配置重新加载账号
+// 构建加权列表：weight<=1 出现 1 次，weight>=2 出现 weight 次
 func (p *AccountPool) Reload() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.accounts = config.GetEnabledAccounts()
+	enabled := config.GetEnabledAccounts()
+	var weighted []config.Account
+	for _, a := range enabled {
+		w := a.Weight
+		if w < 1 {
+			w = 1
+		}
+		for j := 0; j < w; j++ {
+			weighted = append(weighted, a)
+		}
+	}
+	p.accounts = weighted
 }
 
 // GetNext 获取一个可用账号：主池/兜底池 +（排序优先后的）组内加权随机
@@ -73,6 +85,11 @@ func (p *AccountPool) GetNext() *config.Account {
 			continue
 		}
 
+		// 跳过额度已用尽的账号
+		if acc.UsageLimit > 0 && acc.UsageCurrent >= acc.UsageLimit {
+			continue
+		}
+
 		if acc.UsageCurrent >= primaryUsageThreshold {
 			primary = append(primary, acc)
 		} else {
@@ -88,11 +105,14 @@ func (p *AccountPool) GetNext() *config.Account {
 		return picked
 	}
 
-	// 无可用账号，返回冷却时间最短的
+	// 无可用账号，返回冷却时间最短的（排除额度用尽的）
 	var best *config.Account
 	var earliest time.Time
 	for i := range p.accounts {
 		acc := &p.accounts[i]
+		if acc.UsageLimit > 0 && acc.UsageCurrent >= acc.UsageLimit {
+			continue
+		}
 		if cooldown, ok := p.cooldowns[acc.ID]; ok {
 			if best == nil || cooldown.Before(earliest) {
 				best = acc
