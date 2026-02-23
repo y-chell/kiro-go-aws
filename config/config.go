@@ -86,12 +86,12 @@ type Account struct {
 // Config represents the global application configuration.
 type Config struct {
 	// Server settings
-	Password      string    `json:"password"`      // Admin panel password
-	Port          int       `json:"port"`          // HTTP server port (default: 8080)
-	Host          string    `json:"host"`          // HTTP server bind address (default: 0.0.0.0)
-	ApiKey        string    `json:"apiKey,omitempty"`        // API key for client authentication
-	RequireApiKey bool      `json:"requireApiKey"` // Whether to enforce API key validation
-	Accounts      []Account `json:"accounts"`      // Registered Kiro accounts
+	Password      string    `json:"password"`         // Admin panel password
+	Port          int       `json:"port"`             // HTTP server port (default: 8080)
+	Host          string    `json:"host"`             // HTTP server bind address (default: 0.0.0.0)
+	ApiKey        string    `json:"apiKey,omitempty"` // API key for client authentication
+	RequireApiKey bool      `json:"requireApiKey"`    // Whether to enforce API key validation
+	Accounts      []Account `json:"accounts"`         // Registered Kiro accounts
 
 	// Thinking mode configuration for extended reasoning output
 	ThinkingSuffix       string `json:"thinkingSuffix,omitempty"`       // Model suffix to trigger thinking mode (default: "-thinking")
@@ -130,7 +130,7 @@ type AccountInfo struct {
 }
 
 // Version 当前版本号
-const Version = "1.0.2"
+const Version = "1.0.3"
 
 var (
 	cfg     *Config
@@ -389,7 +389,7 @@ type ThinkingConfig struct {
 func GetThinkingConfig() ThinkingConfig {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
-	
+
 	suffix := cfg.ThinkingSuffix
 	if suffix == "" {
 		suffix = "-thinking"
@@ -402,7 +402,7 @@ func GetThinkingConfig() ThinkingConfig {
 	if claudeFormat == "" {
 		claudeFormat = "thinking"
 	}
-	
+
 	return ThinkingConfig{
 		Suffix:       suffix,
 		OpenAIFormat: openaiFormat,
