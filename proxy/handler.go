@@ -183,7 +183,7 @@ func NewHandler() *Handler {
 
 // backgroundRefresh 后台定时刷新账户信息
 func (h *Handler) backgroundRefresh() {
-	ticker := time.NewTicker(30 * time.Minute) // 每 30 分钟刷新一次
+	ticker := time.NewTicker(5 * time.Minute) // 每 5 分钟检查一次
 	defer ticker.Stop()
 
 	// 启动时延迟 10 秒后执行一次
