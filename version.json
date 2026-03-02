@@ -1,0 +1,5 @@
+{
+  "version": "1.0.2",
+  "changelog": "🐛 修复流式响应缺少 usage 字段 (#10)\n🚫 新增账号封禁检测，自动禁用被封账号并标记状态 (#11)\n🔄 更新模型映射列表\n🎨 管理面板显示封禁状态与原因",
+  "download": "https://github.com/Quorinex/Kiro-Go"
+}
