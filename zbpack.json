@@ -1,0 +1,4 @@
+{
+  "start_command": "./kiro-api-proxy",
+  "exposed_port": 8080
+}
