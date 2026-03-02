@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 func main() {
@@ -53,7 +54,14 @@ func main() {
 	handler := proxy.NewHandler()
 
 	// 启动服务器
-	addr := fmt.Sprintf("%s:%d", config.GetHost(), config.GetPort())
+	host := config.GetHost()
+	port := config.GetPort()
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			port = p
+		}
+	}
+	addr := fmt.Sprintf("%s:%d", host, port)
 	log.Printf("Kiro-Go starting on http://%s", addr)
 	log.Printf("Admin panel: http://%s/admin", addr)
 	log.Printf("Claude API: http://%s/v1/messages", addr)
