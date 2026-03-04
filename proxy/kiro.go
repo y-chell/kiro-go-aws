@@ -157,6 +157,57 @@ func getSortedEndpoints(preferred string) []kiroEndpoint {
 	return []kiroEndpoint{kiroEndpoints[0], kiroEndpoints[1]}
 }
 
+func shouldRetryAmazonQSanitized(errBody string) bool {
+	// AmazonQ 有时会对包含推理参数/工具/历史等复杂字段的 payload 返回 400：
+	// {"message":"Improperly formed request.","reason":null}
+	// 这里做一个保守匹配，避免对所有 400 都重试。
+	bodyLower := strings.ToLower(errBody)
+	return strings.Contains(bodyLower, "improperly formed request")
+}
+
+func cloneKiroPayload(payload *KiroPayload) (*KiroPayload, error) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	var cloned KiroPayload
+	if err := json.Unmarshal(b, &cloned); err != nil {
+		return nil, err
+	}
+	return &cloned, nil
+}
+
+func sanitizePayloadForAmazonQ(payload *KiroPayload) (*KiroPayload, error) {
+	cloned, err := cloneKiroPayload(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	// AmazonQ 端点对推理参数/工具上下文的兼容性不稳定，失败时用最小 payload 尝试兜底。
+	cloned.InferenceConfig = nil
+
+	if ctx := cloned.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext; ctx != nil {
+		ctx.Tools = nil
+		ctx.ToolResults = nil
+		// 空上下文直接置空，避免发送 {}
+		cloned.ConversationState.CurrentMessage.UserInputMessage.UserInputMessageContext = nil
+	}
+
+	// 历史里的工具上下文/工具使用也会增加 payload 复杂度；兜底模式下剥离。
+	for i := range cloned.ConversationState.History {
+		if um := cloned.ConversationState.History[i].UserInputMessage; um != nil && um.UserInputMessageContext != nil {
+			um.UserInputMessageContext.Tools = nil
+			um.UserInputMessageContext.ToolResults = nil
+			um.UserInputMessageContext = nil
+		}
+		if am := cloned.ConversationState.History[i].AssistantResponseMessage; am != nil {
+			am.ToolUses = nil
+		}
+	}
+
+	return cloned, nil
+}
+
 // CallKiroAPI 调用 Kiro API（流式），双端点自动 fallback
 func CallKiroAPI(account *config.Account, payload *KiroPayload, callback *KiroStreamCallback) error {
 	if _, err := json.Marshal(payload); err != nil {
@@ -171,8 +222,32 @@ func CallKiroAPI(account *config.Account, payload *KiroPayload, callback *KiroSt
 		// 更新 payload 中的 origin
 		payload.ConversationState.CurrentMessage.UserInputMessage.Origin = ep.Origin
 
-		reqBody, _ := json.Marshal(payload)
-		req, err := http.NewRequest("POST", ep.URL, bytes.NewReader(reqBody))
+		buildAndSend := func(p *KiroPayload) (*http.Response, []byte, error) {
+			reqBody, err := json.Marshal(p)
+			if err != nil {
+				return nil, nil, err
+			}
+			req, err := http.NewRequest("POST", ep.URL, bytes.NewReader(reqBody))
+			if err != nil {
+				return nil, nil, err
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "*/*")
+			req.Header.Set("X-Amz-Target", ep.AmzTarget)
+			req.Header.Set("User-Agent", userAgent)
+			req.Header.Set("X-Amz-User-Agent", amzUserAgent)
+			req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
+			req.Header.Set("x-amzn-codewhisperer-optout", "true")
+			req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
+			req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
+			req.Header.Set("Authorization", "Bearer "+account.AccessToken)
+
+			resp, err := kiroHttpClient.Do(req)
+			return resp, reqBody, err
+		}
+
+		resp, reqBody, err := buildAndSend(payload)
 		if err != nil {
 			lastErr = err
 			continue
@@ -210,6 +285,33 @@ func CallKiroAPI(account *config.Account, payload *KiroPayload, callback *KiroSt
 		if resp.StatusCode != 200 {
 			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+
+			// AmazonQ 偶发 400：Improperly formed request。兜底剥离复杂字段后重试一次。
+			if ep.Name == "AmazonQ" && resp.StatusCode == 400 && shouldRetryAmazonQSanitized(string(errBody)) {
+				sanitized, serr := sanitizePayloadForAmazonQ(payload)
+				if serr == nil {
+					// 保持 origin 与端点一致
+					sanitized.ConversationState.CurrentMessage.UserInputMessage.Origin = ep.Origin
+					resp2, reqBody2, err2 := buildAndSend(sanitized)
+					if err2 == nil && resp2 != nil {
+						if resp2.StatusCode == 200 {
+							err = parseEventStream(resp2.Body, callback, max(1, len(reqBody2)/3))
+							resp2.Body.Close()
+							return err
+						}
+						errBody2, _ := io.ReadAll(resp2.Body)
+						resp2.Body.Close()
+						lastErr = fmt.Errorf("HTTP %d from %s: %s", resp2.StatusCode, ep.Name, string(errBody2))
+						// 认证错误不继续尝试
+						if resp2.StatusCode == 401 || resp2.StatusCode == 403 {
+							return lastErr
+						}
+						fmt.Printf("[KiroAPI] Endpoint %s error: %v\n", ep.Name, lastErr)
+						continue
+					}
+				}
+			}
+
 			lastErr = fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, ep.Name, string(errBody))
 			// 认证错误不继续尝试
 			if resp.StatusCode == 401 || resp.StatusCode == 403 {
