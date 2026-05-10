@@ -286,6 +286,8 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 			buildModelInfo("claude-sonnet-4.6"+thinkingSuffix, "anthropic", true),
 			buildModelInfo("claude-opus-4.6", "anthropic", true),
 			buildModelInfo("claude-opus-4.6"+thinkingSuffix, "anthropic", true),
+	        buildModelInfo("claude-opus-4-7", "anthropic", true),
+            buildModelInfo("claude-opus-4-7"+thinkingSuffix, "anthropic", true),
 			buildModelInfo("claude-sonnet-4.5", "anthropic", true),
 			buildModelInfo("claude-sonnet-4.5"+thinkingSuffix, "anthropic", true),
 			buildModelInfo("claude-sonnet-4", "anthropic", true),
