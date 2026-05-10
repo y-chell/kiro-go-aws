@@ -15,9 +15,9 @@ package main
 
 import (
 	"fmt"
-	"kiro-api-proxy/config"
-	"kiro-api-proxy/pool"
-	"kiro-api-proxy/proxy"
+	"kiro-go/config"
+	"kiro-go/pool"
+	"kiro-go/proxy"
 	"log"
 	"net/http"
 	"os"

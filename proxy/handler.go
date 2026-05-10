@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"kiro-api-proxy/auth"
-	"kiro-api-proxy/config"
-	"kiro-api-proxy/pool"
+	"kiro-go/auth"
+	"kiro-go/config"
+	"kiro-go/pool"
 	"net/http"
 	"strings"
 	"sync"
@@ -341,36 +341,20 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	h.modelsCacheMu.RLock()
 	cached := h.cachedModels
 	h.modelsCacheMu.RUnlock()
+	if len(cached) == 0 {
+		h.refreshModelsCache()
+		h.modelsCacheMu.RLock()
+		cached = h.cachedModels
+		h.modelsCacheMu.RUnlock()
+	}
 
 	thinkingSuffix := config.GetThinkingConfig().Suffix
 
-	var models []map[string]interface{}
-	if len(cached) > 0 {
-		for _, m := range cached {
-			supportsImage := modelSupportsImage(m.InputTypes)
-			models = append(models, buildModelInfo(m.ModelId, "anthropic", supportsImage))
-			// 自动生成 thinking 变体
-			models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, "anthropic", supportsImage))
-		}
-	} else {
-		// fallback 静态列表
-		models = []map[string]interface{}{
-			buildModelInfo("claude-sonnet-4.6", "anthropic", true),
-			buildModelInfo("claude-sonnet-4.6"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-opus-4.6", "anthropic", true),
-			buildModelInfo("claude-opus-4.6"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-opus-4-7", "anthropic", true),
-			buildModelInfo("claude-opus-4-7"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-sonnet-4.5", "anthropic", true),
-			buildModelInfo("claude-sonnet-4.5"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-sonnet-4", "anthropic", true),
-			buildModelInfo("claude-sonnet-4"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-haiku-4.5", "anthropic", true),
-			buildModelInfo("claude-haiku-4.5"+thinkingSuffix, "anthropic", true),
-			buildModelInfo("claude-opus-4.5", "anthropic", true),
-			buildModelInfo("claude-opus-4.5"+thinkingSuffix, "anthropic", true),
-		}
+	models := buildAnthropicModelsResponse(cached, thinkingSuffix)
+	if len(models) == 0 {
+		models = fallbackAnthropicModels(thinkingSuffix)
 	}
+
 	// 添加别名模型
 	models = append(models,
 		buildModelInfo("auto", "kiro-proxy", true),
@@ -383,6 +367,43 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 		"object": "list",
 		"data":   models,
 	})
+	return
+}
+
+func buildAnthropicModelsResponse(cached []ModelInfo, thinkingSuffix string) []map[string]interface{} {
+	if len(cached) == 0 {
+		return nil
+	}
+
+	models := make([]map[string]interface{}, 0, len(cached)*2)
+	if len(cached) > 0 {
+		for _, m := range cached {
+			supportsImage := modelSupportsImage(m.InputTypes)
+			models = append(models, buildModelInfo(m.ModelId, "anthropic", supportsImage))
+			// 自动生成 thinking 变体
+			models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, "anthropic", supportsImage))
+		}
+	}
+	return models
+}
+
+func fallbackAnthropicModels(thinkingSuffix string) []map[string]interface{} {
+	return []map[string]interface{}{
+		buildModelInfo("claude-sonnet-4.6", "anthropic", true),
+		buildModelInfo("claude-sonnet-4.6"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-opus-4.6", "anthropic", true),
+		buildModelInfo("claude-opus-4.6"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-opus-4-7", "anthropic", true),
+		buildModelInfo("claude-opus-4-7"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-sonnet-4.5", "anthropic", true),
+		buildModelInfo("claude-sonnet-4.5"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-sonnet-4", "anthropic", true),
+		buildModelInfo("claude-sonnet-4"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-haiku-4.5", "anthropic", true),
+		buildModelInfo("claude-haiku-4.5"+thinkingSuffix, "anthropic", true),
+		buildModelInfo("claude-opus-4.5", "anthropic", true),
+		buildModelInfo("claude-opus-4.5"+thinkingSuffix, "anthropic", true),
+	}
 }
 
 func modelSupportsImage(inputTypes []string) bool {
@@ -430,29 +451,104 @@ func buildModelInfo(id, ownedBy string, supportsImage bool) map[string]interface
 
 // refreshModelsCache 从 Kiro API 拉取模型列表并缓存
 func (h *Handler) refreshModelsCache() {
-	account := h.pool.GetNext()
-	if account == nil {
+	accounts := config.GetEnabledAccounts()
+	if len(accounts) == 0 {
 		return
 	}
 
-	// 确保 token 有效
-	if err := h.ensureValidToken(account); err != nil {
-		return
+	aggregated := make([]ModelInfo, 0)
+	for i := range accounts {
+		account := &accounts[i]
+		if err := h.ensureValidToken(account); err != nil {
+			fmt.Printf("[ModelsCache] Skip %s token refresh failed: %v\n", account.Email, err)
+			continue
+		}
+
+		models, err := ListAvailableModels(account)
+		if err != nil {
+			fmt.Printf("[ModelsCache] Failed to refresh for %s: %v\n", account.Email, err)
+			continue
+		}
+		aggregated = mergeUniqueModels(aggregated, models)
 	}
 
-	models, err := ListAvailableModels(account)
-	if err != nil {
-		fmt.Printf("[ModelsCache] Failed to refresh: %v\n", err)
-		return
-	}
-
-	if len(models) > 0 {
+	if len(aggregated) > 0 {
 		h.modelsCacheMu.Lock()
-		h.cachedModels = models
+		h.cachedModels = aggregated
 		h.modelsCacheTime = time.Now().Unix()
 		h.modelsCacheMu.Unlock()
-		fmt.Printf("[ModelsCache] Cached %d models\n", len(models))
+		fmt.Printf("[ModelsCache] Cached %d models\n", len(aggregated))
 	}
+}
+
+func mergeUniqueModels(existing []ModelInfo, incoming []ModelInfo) []ModelInfo {
+	if len(incoming) == 0 {
+		return existing
+	}
+
+	indexByID := make(map[string]int, len(existing))
+	merged := make([]ModelInfo, len(existing))
+	copy(merged, existing)
+	for i, model := range merged {
+		indexByID[strings.ToLower(strings.TrimSpace(model.ModelId))] = i
+	}
+
+	for _, model := range incoming {
+		key := strings.ToLower(strings.TrimSpace(model.ModelId))
+		if key == "" {
+			continue
+		}
+		if idx, ok := indexByID[key]; ok {
+			merged[idx] = mergeModelInfo(merged[idx], model)
+			continue
+		}
+		indexByID[key] = len(merged)
+		merged = append(merged, model)
+	}
+
+	return merged
+}
+
+func mergeModelInfo(base ModelInfo, extra ModelInfo) ModelInfo {
+	if base.ModelName == "" {
+		base.ModelName = extra.ModelName
+	}
+	if base.Description == "" {
+		base.Description = extra.Description
+	}
+	if base.RateMultiplier == 0 {
+		base.RateMultiplier = extra.RateMultiplier
+	}
+	if base.TokenLimits == nil {
+		base.TokenLimits = extra.TokenLimits
+	}
+	base.InputTypes = mergeStringLists(base.InputTypes, extra.InputTypes)
+	return base
+}
+
+func mergeStringLists(base []string, extra []string) []string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	merged := make([]string, 0, len(base)+len(extra))
+	for _, item := range base {
+		key := strings.ToLower(strings.TrimSpace(item))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, item)
+	}
+	for _, item := range extra {
+		key := strings.ToLower(strings.TrimSpace(item))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		merged = append(merged, item)
+	}
+	return merged
 }
 
 // handleCountTokens Token 计数（Claude Code 会调用）

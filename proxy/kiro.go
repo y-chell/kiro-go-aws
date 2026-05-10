@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"kiro-api-proxy/config"
+	"kiro-go/config"
 	"net/http"
 	"net/url"
 	"strconv"

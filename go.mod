@@ -1,4 +1,4 @@
-module kiro-api-proxy
+module kiro-go
 
 go 1.21
 
