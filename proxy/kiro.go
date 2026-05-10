@@ -222,56 +222,38 @@ func CallKiroAPI(account *config.Account, payload *KiroPayload, callback *KiroSt
 		// 更新 payload 中的 origin
 		payload.ConversationState.CurrentMessage.UserInputMessage.Origin = ep.Origin
 
-		buildAndSend := func(p *KiroPayload) (*http.Response, []byte, error) {
+		buildAndSend := func(p *KiroPayload) (*http.Response, error) {
 			reqBody, err := json.Marshal(p)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			req, err := http.NewRequest("POST", ep.URL, bytes.NewReader(reqBody))
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
+
+			host := ""
+			if parsedURL, parseErr := url.Parse(ep.URL); parseErr == nil {
+				host = parsedURL.Host
+			}
+			headerValues := buildStreamingHeaderValues(account, host)
 
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Accept", "*/*")
 			req.Header.Set("X-Amz-Target", ep.AmzTarget)
-			req.Header.Set("User-Agent", userAgent)
-			req.Header.Set("X-Amz-User-Agent", amzUserAgent)
+			applyKiroBaseHeaders(req, account, headerValues)
 			req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
 			req.Header.Set("x-amzn-codewhisperer-optout", "true")
 			req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
 			req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
-			req.Header.Set("Authorization", "Bearer "+account.AccessToken)
 
 			resp, err := kiroHttpClient.Do(req)
-			return resp, reqBody, err
+			return resp, err
 		}
 
-		resp, reqBody, err := buildAndSend(payload)
+		resp, err := buildAndSend(payload)
 		if err != nil {
 			lastErr = err
-			continue
-		}
-
-		host := ""
-		if parsedURL, parseErr := url.Parse(ep.URL); parseErr == nil {
-			host = parsedURL.Host
-		}
-		headerValues := buildStreamingHeaderValues(account, host)
-
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "*/*")
-		req.Header.Set("X-Amz-Target", ep.AmzTarget)
-		applyKiroBaseHeaders(req, account, headerValues)
-		req.Header.Set("x-amzn-kiro-agent-mode", "vibe")
-		req.Header.Set("x-amzn-codewhisperer-optout", "true")
-		req.Header.Set("Amz-Sdk-Request", "attempt=1; max=3")
-		req.Header.Set("Amz-Sdk-Invocation-Id", uuid.New().String())
-
-		resp, err := kiroHttpClient.Do(req)
-		if err != nil {
-			lastErr = err
-			fmt.Printf("[KiroAPI] Endpoint %s failed: %v\n", ep.Name, err)
 			continue
 		}
 
@@ -292,10 +274,10 @@ func CallKiroAPI(account *config.Account, payload *KiroPayload, callback *KiroSt
 				if serr == nil {
 					// 保持 origin 与端点一致
 					sanitized.ConversationState.CurrentMessage.UserInputMessage.Origin = ep.Origin
-					resp2, reqBody2, err2 := buildAndSend(sanitized)
+					resp2, err2 := buildAndSend(sanitized)
 					if err2 == nil && resp2 != nil {
 						if resp2.StatusCode == 200 {
-							err = parseEventStream(resp2.Body, callback, max(1, len(reqBody2)/3))
+							err = parseEventStream(resp2.Body, callback)
 							resp2.Body.Close()
 							return err
 						}
