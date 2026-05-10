@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
-  "changelog": "✅ 新增 clientID/clientSecret 校验\n⚖️ 新增账号权重字段，支持加权轮询策略\n🔄 批量账号管理（启用/禁用/刷新/详情）\n🚫 自动跳过用量耗尽的账号\n🔧 重构模型映射为有序列表，避免误匹配",
+  "version": "1.0.4",
+  "changelog": "✨ Added and fixed several improvements across the project.\n🛠️ 新增并修复了一些内容，包含若干功能改进与问题修复。",
   "download": "https://github.com/Quorinex/Kiro-Go"
 }

@@ -22,8 +22,8 @@ var modelMapOrdered = []modelMapping{
 	{"claude-sonnet-4.5", "claude-sonnet-4.5"},
 	{"claude-sonnet-4-6", "claude-sonnet-4.6"},
 	{"claude-sonnet-4.6", "claude-sonnet-4.6"},
-	{"claude-opus-4-7", "claude-opus-4-7"},
-	{"claude-opus-4.7", "claude-opus-4-7"},
+	{"claude-opus-4-7", "claude-opus-4.7"},
+	{"claude-opus-4.7", "claude-opus-4.7"},
 	{"claude-haiku-4-5", "claude-haiku-4.5"},
 	{"claude-haiku-4.5", "claude-haiku-4.5"},
 	{"claude-opus-4-5", "claude-opus-4.5"},
@@ -73,7 +73,7 @@ func ParseModelAndThinking(model string, thinkingSuffix string) (string, bool) {
 		return model, thinking
 	}
 
-	return "claude-sonnet-4.5", thinking
+	return model, thinking
 }
 
 func MapModel(model string) string {
@@ -184,8 +184,8 @@ func ClaudeToKiro(req *ClaudeRequest, thinking bool) *KiroPayload {
 			} else {
 				userMsg := KiroUserInputMessage{
 					Content: content,
-					// ModelID: modelID,
-					Origin: origin,
+					ModelID: modelID,
+					Origin:  origin,
 				}
 				if len(images) > 0 {
 					userMsg.Images = images
@@ -236,9 +236,9 @@ func ClaudeToKiro(req *ClaudeRequest, thinking bool) *KiroPayload {
 	payload.ConversationState.ConversationID = buildConversationID(modelID, systemPrompt, firstClaudeConversationAnchor(req.Messages))
 	payload.ConversationState.CurrentMessage.UserInputMessage = KiroUserInputMessage{
 		Content: finalContent,
-		// ModelID: modelID,
-		Origin: origin,
-		Images: currentImages,
+		ModelID: modelID,
+		Origin:  origin,
+		Images:  currentImages,
 	}
 
 	if len(kiroTools) > 0 || len(currentToolResults) > 0 {
@@ -615,9 +615,9 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 				history = append(history, KiroHistoryMessage{
 					UserInputMessage: &KiroUserInputMessage{
 						Content: content,
-						// ModelID: modelID,
-						Origin: origin,
-						Images: images,
+						ModelID: modelID,
+						Origin:  origin,
+						Images:  images,
 					},
 				})
 			}
@@ -661,8 +661,8 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 					history = append(history, KiroHistoryMessage{
 						UserInputMessage: &KiroUserInputMessage{
 							Content: buildToolResultsContinuation(currentToolResults),
-							// ModelID: modelID,
-							Origin: origin,
+							ModelID: modelID,
+							Origin:  origin,
 							UserInputMessageContext: &UserInputMessageContext{
 								ToolResults: currentToolResults,
 							},
@@ -698,9 +698,9 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 	payload.ConversationState.ConversationID = buildConversationID(modelID, systemPrompt, firstOpenAIConversationAnchor(nonSystemMessages))
 	payload.ConversationState.CurrentMessage.UserInputMessage = KiroUserInputMessage{
 		Content: finalContent,
-		// ModelID: modelID,
-		Origin: origin,
-		Images: currentImages,
+		ModelID: modelID,
+		Origin:  origin,
+		Images:  currentImages,
 	}
 
 	if len(kiroTools) > 0 || len(currentToolResults) > 0 {
